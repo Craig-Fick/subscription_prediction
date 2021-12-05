@@ -1,0 +1,732 @@
+import necessary packages
+```{r}
+library(dplyr)
+library(caret)
+library(e1071)
+library(xgboost)
+library(ROSE)
+library(farff)
+library(dplyr)
+library(ranger)
+library(imbalance)
+library(Boruta)
+library(Amelia)
+```
+
+Import data
+```{r}
+# import labeled data
+labl = read.csv("LabelData.csv")
+# convert outcome "adopter" to be a factor for classification
+labl$adopter = factor(labl$adopter)
+# user_id not useful as a feature
+labl = labl %>% select(-user_id)
+
+# import unlabeled data and make predictions
+unlabl = read.csv("UnlabelData.csv")
+```
+
+shape of data
+```{r}
+# dimensions are off by one row
+dim(labl)
+dim(unlabl)
+
+# remove one row
+labl <- labl[-86682, ]
+dim(labl)
+```
+check for missing values - No missing values
+```{r}
+missmap(labl)
+```
+
+
+check balance of the data - pretty unbalanced 1.8% pos/ 98% neg.
+```{r}
+# find difference between class
+numPositive <- length(which(labl$adopter == 1))
+numPositive
+numNegative <- length(which(labl$adopter == 0))
+numNegative
+nInstances <- numNegative - numPositive
+nInstances
+# amount of obs
+tot <- numNegative + numPositive
+# percentage positive
+percpos <- numPositive/tot*100
+percpos
+#percentage negative
+percneg <- numNegative/tot*100
+percneg
+```
+
+try manual undersampling - went with 1540 positive and 6000 negative
+```{r}
+labl_positive_ind <- which(labl$adopter == 1)
+labl_negative_ind <- which(labl$adopter == 0)
+
+nsample <-6000
+pick_negative <- sample(labl_negative_ind, nsample)
+
+undersample_df1 <- labl[c(labl_positive_ind, pick_negative), ]
+
+dim(undersample_df1)
+
+```
+
+```{r}
+# verify class count; 6000 neg, 1540 pos.
+table(undersample_df1$adopter)
+head(undersample_df1)
+```
+
+
+Feature selection using Caret- 
+```{r}
+library(caret)
+set.seed(100)
+
+rPartMod <- train(adopter ~ ., data=undersample_df1, method="rpart")
+
+rpartImp <- varImp(rPartMod)
+print(rpartImp)
+```
+
+
+feature Selection using boruta - top 12 features similar to caret results will be taken
+```{r}
+boruta_output <- Boruta(adopter ~ ., data=na.omit(undersample_df1), doTrace=0)
+
+# Do a tentative rough fix
+roughFixMod <- TentativeRoughFix(boruta_output)
+boruta_signif <- getSelectedAttributes(roughFixMod)
+
+# Variable Importance Scores
+imp <- attStats(roughFixMod)
+imp2 = imp[imp$decision != 'Rejected', c('meanImp', 'decision')]
+imp2[order(-imp2$meanImp), ]
+
+```
+plot
+```{r}
+plot(boruta_output, cex.axis=.7, las=2, xlab="", main="Variable Importance")  
+```
+
+
+Feature selection using backwards elimination
+```{r}
+# backwards feature selection
+library(dplyr)
+
+y = undersample_df1$adopter
+selected_features = 1:25
+best_f = 0
+
+while (TRUE) {
+  feature_to_drop = -1
+  for (i in selected_features) {
+    train = undersample_df1 %>% select(setdiff(selected_features,i), adopter)
+    test =  undersample_df1 %>% select(setdiff(selected_features,i), adopter)
+    svm_model_lin = svm(y ~ ., data = train, kernel = "radial")
+    pred = predict(svm_model_lin, test)
+    
+    #matrix
+    cm = confusionMatrix(pred, test$adopter, mode = "prec_recall", positive = "1")
+    fmeasure = cm$byClass[7]
+    
+    if (fmeasure > best_f) {
+      best_f = fmeasure
+      feature_to_drop = i
+    }
+  }
+  if (feature_to_drop != -1) {
+    selected_features = setdiff(selected_features, feature_to_drop)
+    print(selected_features)
+    print(best_f)
+  }
+  else break
+}
+
+```
+best features are all -14 and 19 bal =1540:4000
+best features are all -7 bal= 1540:6000
+
+
+
+Forward feature selection
+```{r}
+library(caret) # confusion matrix
+library(pROC)
+
+
+# create 5 fold
+cv <- createFolds(y = undersample_df1$adopter, k = 5)
+best_auc = 0
+selected_features = c()
+while (TRUE) {
+   feature_to_add = -1
+   for (i in setdiff(1:25, selected_features)) {
+      train = undersample_df1 %>% select(selected_features, i, adopter)
+      test = undersample_df1 %>% select(selected_features, i, adopter)
+      logit_model = glm(adopter ~ ., data = train, family = binomial(link = "logit"))
+      pred_prob = predict(logit_model, test, type = "response")
+      auc = auc(ifelse(test$adopter == "1",1,0), pred_prob)
+      if (auc > best_auc) {
+         best_auc = auc
+         feature_to_add = i
+      }
+   }
+   if (feature_to_add != -1) {
+      selected_features = c(selected_features, feature_to_add)
+      print(selected_features)
+      print(best_auc)
+   }
+else break
+}
+```
+best features are 9 7 18 19 17 22 16 bal = 1540:4000
+best features are 9  7 18 17 22 21 20 bal = 1540:6000
+
+
+***PCA in Python*** use top 12
+'songsListened' 
+'delta_songsListened' 
+'lovedTracks',  
+'shouts', 
+'friend_cnt',
+'posts', 
+'delta_lovedTracks',
+'tenure'
+'friend_country_cnt'
+'delta_posts',
+'delta_shouts',
+'delta_friend_cnt',
+
+
+
+## New Data frames from feature selection
+
+
+
+
+Create DF for pca selection -  bal 1540:6000
+```{r}
+head(undersample_df1)
+
+top_feat_pca <- undersample_df1[,c(8 , 18 , 9 ,12, 3, 10, 19, 23, 6,20,26)]
+head(top_feat_pca)
+
+```
+
+create new df with dimension reduction for package borouta - 12 features
+```{r}
+top_feat_bor <- data.frame(undersample_df1$lovedTracks,undersample_df1$delta_songsListened,undersample_df1$delta_lovedTracks,undersample_df1$delta_subscriber_friend_cnt,
+                          undersample_df1$avg_friend_age,undersample_df1$songsListened,undersample_df1$age,undersample_df1$delta_friend_cnt,undersample_df1$friend_cnt,
+                          undersample_df1$subscriber_friend_cnt,undersample_df1$delta_shouts,undersample_df1$tenure,undersample_df1$adopter)
+colnames(top_feat_bor) <- c("lovedTracks","delta_dongsListened","delta_lovedTracks","delta_subscriber_friend_cnt","avg_friend_age","songsListened","age",
+                            "delta_friend_cnt","friend_cnt","subscriber_friend_cnt","delta_shouts","tenure","adopter")
+#head(top_feat_bor)
+```
+
+create new df with dimension reduction for Caret Package - 8 features
+```{r}
+top_feat_car <- data.frame(undersample_df1$delta_songsListened,undersample_df1$lovedTracks,undersample_df1$subscriber_friend_cnt, undersample_df1$delta_lovedTracks,
+                           undersample_df1$songsListened, undersample_df1$avg_friend_age, undersample_df1$age,undersample_df1$good_country, undersample_df1$adopter)
+colnames(top_feat_car) <- c("delta_songsListened", "lovedTracks", "subscriber_friend_cnt","delta_lovedTracks", "songsListened","avg_friend_age","age","good_country","adopter")
+#head(top_feat_bor)
+```
+
+
+Create Df for backwards selection
+```{r}
+top_feat_back <- undersample_df1[,-c(14,19)]
+head(top_feat_back)
+```
+
+
+Create DF for forwards selection - 9 7 18 19 17 22 16 = bal 1540:4000 ; 9  7 18 17 22 21 20 = bal 1540:4000
+```{r}
+top_feat_forw <- undersample_df1[,c(9 , 7 ,18 ,17, 22, 21, 20,26)]
+head(top_feat_forw)
+
+```
+
+
+
+
+## Data Splitting section
+
+
+split data for borouta 70:30
+```{r}
+set.seed(1)
+train_rows = createDataPartition(y = top_feat_bor$adopter, p = 0.80, list = FALSE)
+trainBor = top_feat_bor[train_rows,]
+testBor = top_feat_bor[-train_rows,]
+```
+
+split data for caret 70:30
+```{r}
+set.seed(1)
+train_rows = createDataPartition(y = top_feat_car$adopter, p = 0.80, list = FALSE)
+trainCar = top_feat_car[train_rows,]
+testCar = top_feat_car[-train_rows,]
+```
+
+split data for backwards selection 70:30
+```{r}
+set.seed(1)
+train_rows = createDataPartition(y = top_feat_back$adopter, p = 0.80, list = FALSE)
+trainBack = top_feat_back[train_rows,]
+testBack = top_feat_back[-train_rows,]
+```
+
+split data for forward selection 70:30
+```{r}
+set.seed(1)
+train_rows4 = createDataPartition(y = top_feat_forw$adopter, p = 0.80, list = FALSE)
+trainForw = top_feat_forw[train_rows4,]
+testForw = top_feat_forw[-train_rows4,]
+```
+
+split data for pca selection 80:20
+```{r}
+set.seed(1)
+train_rows = createDataPartition(y = top_feat_pca$adopter, p = 0.80, list = FALSE)
+trainPCA = top_feat_pca[train_rows,]
+testPCA = top_feat_pca[-train_rows,]
+```
+
+
+
+# Model Testing Section
+
+Build and test - bayes
+```{r}
+set.seed(1)
+
+# Build a naive bayes model
+model = naiveBayes(adopter ~ ., data = trainBack)
+
+pred = predict(model, testBack)
+
+# matrix
+cm = confusionMatrix(factor(pred), testBack$adopter, mode = "prec_recall", positive = "1")
+
+# f-measure
+fmeasure = cm$byClass[7]
+fmeasure
+```
+Test results using Naive Bayes and Different feature selections - balance = 1540:4000, split = 80:20
+
+Boruta
+0.2773333
+
+Caret
+0.3207127
+
+Backwards
+0.3047619
+
+Forwards  <----- the winner
+0.3550562
+
+Test results using Naive Bayes and Different feature selections - balance = 1540:6000, split = 80:20
+Boruta
+0.2332506
+
+Caret
+0.271028 
+
+Backwards
+0.2631579
+
+Forwards  
+0.1935484 
+
+
+
+CV + rf
+```{r}
+
+
+ctrl <- trainControl(method = "repeatedcv",
+                     number = 10,
+                     repeats = 10,
+                     verboseIter = FALSE,
+                     sampling = "down")
+
+
+random_model_us_rf <- caret::train(adopter ~ .,
+                                data = trainForw,
+                                method = "rf",
+                                preProcess = c("scale", "center"),
+                                trControl = ctrl)
+
+predict_undersample_prob <- predict(random_model_us_rf, 
+                                    newdata = testForw,
+                                    type = "prob")
+
+
+predict_undersample_classes <- ifelse(predict_undersample_prob$`1` > 0.5, 
+                                      "1", "0")
+
+# matrix
+cm = confusionMatrix(factor(predict_undersample_classes), testForw$adopter, mode = "prec_recall", positive = "1")
+
+# f-measure
+fmeasure = cm$byClass[7]
+fmeasure
+```
+Previous score on base train
+0.5138577
+
+For Forward selection  - balance = 1540:4000, split = 80:20
+0.5678074
+
+For Forward selection  - balance = 1540:6000, split = 80:20
+0.5016216 
+
+
+hw5 model
+```{r}
+set.seed(1)
+
+# packages
+library(e1071)
+library(fastAdaboost)
+library(dplyr)
+library(randomForest)
+
+# different arguments for models
+nIters = 1:5
+ntrees <- c(20,50,75,300,500)
+kern <- c("radial","polynomial")
+lap <- c(0,1)  # <----- adjust smoothing
+
+# place holders
+model_n = 1
+model_no = c()
+Iter_n = c()
+tree_n = c()
+kern_type = c()
+laplace_n = c()
+fmeasure_result = c()
+
+for (i in nIters) {
+    for (j in ntrees) {
+        for (k in kern){
+            for (l in lap){
+                # keep track for best model results
+                 model_no <- c(model_no, model_n)
+                 Iter_n <- c(Iter_n, i)
+                 tree_n <- c(tree_n, j)
+                 kern_type <- c(kern_type, k)
+                 laplace_n <- c(laplace_n, l)
+
+                 # train three base learners; our models/techniques for higher f-measures should be SVM, random forest, and boosting
+                 # naive bayes
+                 bayes_model = naiveBayes(adopter ~ ., data = trainForw, laplace = l)
+                 # random forest
+                 rf_model = randomForest(adopter ~ ., data = trainForw, ntree = j)
+                 # SVM
+                 svm_model = svm(adopter ~., data= trainForw, kernel = k)                                       
+
+                 # make predictions using base learners
+                 pred_bayes = predict(bayes_model, testForw)
+                 pred_rf = predict(rf_model, testForw)
+                 pred_svm = predict(svm_model, testForw)
+
+                 # add base learners' predictions to the bank_test data as new variables
+                 testForw$pred_bayes = pred_bayes
+                 testForw$pred_rf = pred_rf
+                 testForw$pred_svm = pred_svm 
+
+                 # do the second split
+                 train2_rows = createDataPartition(y = testForw$adopter, p = 0.50, list = FALSE)
+                 train2 = testForw[train2_rows,]
+                 test2 = testForw[-train2_rows,]
+
+                 # build the boosting combiner
+                 boost_model = adaboost(adopter ~ ., data = train2, nIter = i)
+                 
+                 # predictions
+                 pred_boost = predict(boost_model, test2)
+
+                 
+                 # matrix
+                 cm = confusionMatrix(pred_boost$class, test2$adopter, mode = "prec_recall", positive = "1")
+
+                 # f-measure
+                 fmeasure = cm$byClass[7]
+                 fmeasure_result = c(fmeasure_result, fmeasure)
+                 model_n = model_n+1
+            }
+        }
+    }
+}
+
+# create data frame in desc order by f-measure
+df3 <- data.frame(model_no, Iter_n, tree_n, kern_type, laplace_n, fmeasure_result)
+
+df4 <- df3 %>% arrange(desc(df3$fmeasure_result))
+df4
+```
+
+
+
+
+
+***test results for all models tried***
+
+bayes no split using label(train)/unlabel(test)
+f1 = 0.0257971
+
+bayes + undersampling 1540 pos: 6000 neg
+f1= 0.02757353
+
+bayes + Undersampling + feature selection + train/test split
+f1= 0.2798092 
+
+rf + undersampling + feature selection + cv
+f1 = 0.5138577
+
+rf + undersampling + cv + Forward selection  - balance = 1540:4000, split = 80:20
+***0.5678074***
+
+xgboost + rf + undersampling + feature selection + train/test split
+f1 = 0.3401211
+
+hw5 model(stacking/boosting) + undersampling + feature selection + train/test split
+f1 = 0.4979253 
+model_no  Iter_n tree_n  kern_type   laplace_n
+61	        2	     24	     radial	      0	
+
+hw5 model(stacking/boosting) + undersampling + feature selection + train/test split + adjusted range of trees from 20-25 to 20,50,75,100
+f1 = 0.5047619
+model_no  Iter_n tree_n  kern_type   laplace_n
+64        	4   	100	    polynomial    	1	
+
+hw5 model(stacking/boosting) + undersampling + Forward selection  - balance = 1540:4000, split = 80:20
+0.5742574
+model_no  Iter_n tree_n  kern_type   laplace_n
+38	         2	   500	   radial	      1	
+
+
+
+## Feature selection for testing on unlabeled data
+
+
+
+update unlabeled data for testing - Bor package
+```{r}
+# predictions on unlabeled set
+# head(unlabl)
+# dropping the unimportant features
+# user_id not useful as a feature
+# unlabl = unlabl %>% select(-user_id)
+# add same top features
+unlabl_test_Bor <- data.frame(unlabl$user_id,unlabl$lovedTracks,unlabl$delta_songsListened,unlabl$delta_lovedTracks,unlabl$delta_subscriber_friend_cnt,
+                          unlabl$avg_friend_age,unlabl$songsListened,unlabl$age,unlabl$delta_friend_cnt,unlabl$friend_cnt,
+                          unlabl$subscriber_friend_cnt,unlabl$delta_shouts,unlabl$tenure)
+colnames(unlabl_test_Bor) <- c("user_id","lovedTracks","delta_dongsListened","delta_lovedTracks","delta_subscriber_friend_cnt","avg_friend_age","songsListened","age","delta_friend_cnt","friend_cnt"
+                        ,"subscriber_friend_cnt","delta_shouts","tenure")
+# view df
+#head(unlabl_test)
+head(unlabl_test_Bor)
+```
+update unlabeled data for testing - Car package
+```{r}
+unlabl_test_Car <- data.frame(unlabl$delta_songsListened, unlabl$lovedTracks, unlabl$subscriber_friend_cnt,
+                              unlabl$delta_lovedTracks,unlabl$songsListened, unlabl$avg_friend_age, unlabl$age,unlabl$good_country)
+colnames(unlabl_test_Car) <- c("delta_songsListened", "lovedTracks", "subscriber_friend_cnt","delta_lovedTracks","songsListened",
+                               "avg_friend_age","age","good_country")
+# view df
+#head(unlabl_test)
+head(unlabl_test_Car)
+```
+
+Update unlabeled data for testing - forward feature selection
+```{r}
+unlabl_forw <- unlabl[,c(10,8,19,20,18,23,17)]
+head(unlabl_forw)
+
+```
+
+Update unlabeled data for testing - forward feature selection
+```{r}
+unlabl_pca <- unlabl[,c(9 , 19 , 10 ,13, 4, 11, 20, 24, 7,21)]
+head(unlabl_pca)
+
+```
+
+
+
+
+
+
+# Test final models result with unlabeled data
+
+```{r}
+library(caret)
+set.seed(1)
+ctrl <- trainControl(method = "repeatedcv",
+                     number = 10,
+                     repeats = 10,
+                     verboseIter = FALSE,
+                     sampling = "down")
+
+random_model_us_rf <- caret::train(adopter ~ .,
+                                data = trainCar,
+                                method = "rf",
+                                preProcess = c("scale", "center"),
+                                trControl = ctrl)
+
+predict_undersample_prob <- predict(random_model_us_rf, 
+                                    newdata = unlabl_test_Car,
+                                    type = "prob")
+
+predict_undersample_classes <- ifelse(predict_undersample_prob$`1` > 0.5, "1", "0")
+pred <- as.factor(predict_undersample_classes)
+```
+
+Try other models for submission - 
+```{r}
+set.seed(1)
+
+# Build a naive bayes model
+model = naiveBayes(adopter ~ ., data = trainCar)
+
+pred = predict(model, unlabl_test_Car)
+
+```
+
+basic random forrest
+```{r}
+# Fitting the model
+rf_model = randomForest(adopter ~ ., data = trainCar)
+   
+# Predict results
+pred = predict(rf_model, unlabl_test_Car)
+
+```
+
+svm
+```{r}
+svm_model = svm(adopter ~., data= trainCar, kernel = "polynomial")
+pred = predict(svm_model, unlabl_test_Car)
+```
+
+boosting/stacking
+```{r}
+library(rpart)
+
+set.seed(1)
+
+# train three base learners
+    # decision tree
+tree_model = rpart(adopter ~ ., data = trainCar, method = "class", parms = list(split = "information"))         
+    # logistic Regression
+logit_model = glm(adopter ~ ., data = trainCar, family = binomial(link = "logit"))
+    # SVM
+svm_model = svm(adopter ~., data= trainCar, kernel = "polynomial")                                       
+
+# make predictions using base learners
+pred_tree = predict(tree_model, testCar, type = "class")
+pred_logit = predict(logit_model, testCar)
+pred_svm = predict(svm_model, testCar)
+
+# add base learners' predictions to the income_test data
+income_test = testCar %>% mutate(pred_tree = pred_tree, pred_logit = pred_logit, pred_svm = pred_svm)
+
+# do the second split
+train2_rows = createDataPartition(y = testCar$adopter, p = 0.50, list = FALSE)
+train2 = testCar[train2_rows,]
+test2 = testCar[-train2_rows,]
+
+# build the naive bayes combiner
+rf_model = randomForest(adopter ~ ., data = train2)
+
+# evaluate the bayes
+pred = predict(rf_model, unlabl_test_Car)
+
+```
+
+
+hw5 with top result arguments from above
+```{r}
+# train three base learners; our models/techniques for higher f-measures should be SVM, random forest, and boosting
+# naive bayes
+bayes_model = naiveBayes(adopter ~ ., data = trainCar, laplace = 1)
+# random forest
+rf_model = randomForest(adopter ~ ., data = trainCar, ntree = 500)
+# SVM
+svm_model = svm(adopter ~., data= trainCar, kernel = 'radial')                                       
+
+# make predictions using base learners
+pred_bayes = predict(bayes_model, testCar)
+pred_rf = predict(rf_model, testCar)
+pred_svm = predict(svm_model, testCar)
+
+# add base learners' predictions to the bank_test data as new variables
+testCar$pred_bayes = pred_bayes
+testCar$pred_rf = pred_rf
+testCar$pred_svm = pred_svm 
+
+# do the second split
+train2_rows = createDataPartition(y = testCar$adopter, p = 0.50, list = FALSE)
+train2 = testCar[train2_rows,]
+test2 = testCar[-train2_rows,]
+
+# build the boosting combiner
+boost_model = adaboost(adopter ~ ., data = train2, nIter = 2)
+                 
+# predictions
+pred = predict(boost_model, unlabl_test_Car)
+
+```
+
+ rf + 80/20 train split / forward features bal = 1540:4000
+basic random forrest
+```{r}
+# Fitting the model
+rf_model = randomForest(adopter ~ ., data = trainCar)
+   
+# Predict results
+pred = predict(rf_model, unlabl_test_Car)
+
+```
+
+
+
+
+Current Top model - rf + 90/10 train split / caret features
+basic random forrest
+```{r}
+# Fitting the model
+#rf_model = randomForest(adopter ~ ., data = trainCar)
+   
+# Predict results
+#pred = predict(rf_model, unlabl_test_Car)
+```
+
+ rf + 80/20 train split / pca features bal = 1540:6000
+basic random forrest
+```{r}
+# Fitting the model
+#rf_model = randomForest(adopter ~ ., data = trainPCA)
+   
+# Predict results
+#pred = predict(rf_model, unlabl_pca)
+
+```
+
+
+
+```{r}
+# prepare submission
+#submission = data.frame(user_id = unlabl_test$user_id,Predictions = pred)
+
+#write.csv(submission, "Craig_Fick-Submission.csv", row.names = FALSE)
+```
