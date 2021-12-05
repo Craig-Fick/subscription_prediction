@@ -6,7 +6,7 @@ link: https://www.kaggle.com/c/nyu-shbigb-7311
 This ia a project that is on kaggle that anyone can enter. The date has past for the chance to be ranked, but you can still submit your submissions for to see how well your model works. My highest f-measure was 0.13342.
 
 My Approach
-I ran all of my models off of one file so I could tweak arguments faster. It is pretty sloppy, but here is a list of basically what was tested.
+I ran all of my models off of one file so I could tweak arguments faster.
 
 - Feature selection
 - forward/backward elimination
