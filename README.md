@@ -92,18 +92,5 @@ easy to beat.
 Model Performance Assessment
 To assess the out-of-sample performance of your model, you will also be provided with an 
 unlabeled dataset of another set of 86,681 users with the same attributes as described above, 
-except this dataset does not have the outcome labels. No more than once per calendar day, you 
-can use your current best model to predict outcomes in this dataset and email the predictions to the 
-instructor. Your predictions should come in a .csv file named “X-Submission.csv” (replace X with 
-your name) with two columns: user_id and prediction, where the user_id column must match the 
-user IDs in the unlabeled dataset, and prediction column contains binary (0/1) predictions for each 
-user. Prediction files that do not follow this format will not be scored.
-Upon receiving your predictions, the instructor will score your prediction against actual outcome 
-labels and will email you back your model’s performance. The best-to-date performance will be 
-continuously updated on the leaderboard page on Canvas. The scoring metric used for this 
-project is the F-measure for the “adopter = 1” class. The individual predictions will be accepted 
-by the instructor until end-of-day on December 5th.
-Evaluation: 15 points total
-• Performance: This is based on two aspects: (1) the final performance achieved by your best 
-reported model, and (2) the diversity of techniques, methodologies, and approaches you have tried 
-(i.e., there will be a penalty if you only tried a small number of models)
+except this dataset does not have the outcome labels. 
+
