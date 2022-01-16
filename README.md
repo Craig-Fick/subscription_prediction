@@ -5,10 +5,16 @@ link: https://www.kaggle.com/c/nyu-shbigb-7311
 
 This ia a project that is on kaggle that anyone can enter. The date has past for the chance to be ranked, but you can still submit your submissions for to see how well your model works. My highest f-measure was 0.13342.
 
-My Approach
+
+My Approach:
+
+
 I ran all of my models off of one file so I could tweak arguments faster.
 
-- Feature selection
+
+- Feature selection:
+
+
 - forward/backward elimination
 - information gain using Caret and Boruta packages
 - PCA using python
@@ -34,7 +40,9 @@ I ran all of my models off of one file so I could tweak arguments faster.
 
 
 
-Task Description
+Task Description:
+
+
 Website XYZ, a music-listening social networking website, follows the “freemium” business
 model. The website offers basic services for free, and provides a number of additional premium 
 capabilities for a monthly subscription fee. We are interested in predicting which people would be 
@@ -43,8 +51,13 @@ targeted by our promotional campaign. You have a dataset (provided on the course
 site) from the previous marketing campaign which targeted a number of non-subscribers.
 Specifically, the labeled dataset contains 86,682 records, each record representing a different user 
 of the XYZ website who was targeted in the previous marketing campaign. Each record is 
-described with 25 attributes. Here is a brief description of the attributes (attribute
+described with 25 attributes. 
+
+
+Here is a brief description of the attributes (attribute
 name/type/explanation):
+
+
 • adopter / binominal (0 or 1) / whether a user became a subscriber within the 6 month period 
 after the marketing campaign (this is the outcome variable!)
 • user_id / integer / unique user id (obviously, this is not a predictive feature, just a unique 
